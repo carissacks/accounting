@@ -18,5 +18,7 @@ const config = process.env.NODE_ENV === 'test' ? testConfig : devConfig;
       models: [Company, User, Ticket],
     }),
   ],
+  // NOTES: Adding SequelizeModule to allow transactions
+  exports: [SequelizeModule],
 })
 export class DbModule {}
