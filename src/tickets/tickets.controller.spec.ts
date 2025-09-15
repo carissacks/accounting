@@ -1,7 +1,11 @@
-import { ConflictException } from '@nestjs/common';
+import {
+  ConflictException,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
 import { Company } from '../../db/models/Company';
 import {
+  Ticket,
   TicketCategory,
   TicketStatus,
   TicketType,
@@ -9,6 +13,7 @@ import {
 import { User, UserRole } from '../../db/models/User';
 import { DbModule } from '../db.module';
 import { TicketsController } from './tickets.controller';
+import { TicketsService } from './tickets.service';
 
 describe('TicketsController', () => {
   let controller: TicketsController;
@@ -16,6 +21,7 @@ describe('TicketsController', () => {
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
       controllers: [TicketsController],
+      providers: [TicketsService],
       imports: [DbModule],
     }).compile();
 
@@ -46,29 +52,6 @@ describe('TicketsController', () => {
 
         expect(ticket.category).toBe(TicketCategory.accounting);
         expect(ticket.assigneeId).toBe(user.id);
-        expect(ticket.status).toBe(TicketStatus.open);
-      });
-
-      it('if there are multiple accountants, assign the last one', async () => {
-        const company = await Company.create({ name: 'test' });
-        await User.create({
-          name: 'Test User',
-          role: UserRole.accountant,
-          companyId: company.id,
-        });
-        const user2 = await User.create({
-          name: 'Test User',
-          role: UserRole.accountant,
-          companyId: company.id,
-        });
-
-        const ticket = await controller.create({
-          companyId: company.id,
-          type: TicketType.managementReport,
-        });
-
-        expect(ticket.category).toBe(TicketCategory.accounting);
-        expect(ticket.assigneeId).toBe(user2.id);
         expect(ticket.status).toBe(TicketStatus.open);
       });
 
@@ -107,33 +90,33 @@ describe('TicketsController', () => {
         expect(ticket.status).toBe(TicketStatus.open);
       });
 
-      it('if there are multiple secretaries, throw', async () => {
+      it('if there is no assignee, throw', async () => {
         const company = await Company.create({ name: 'test' });
-        await User.create({
-          name: 'Test User',
-          role: UserRole.corporateSecretary,
-          companyId: company.id,
-        });
-        await User.create({
-          name: 'Test User',
-          role: UserRole.corporateSecretary,
-          companyId: company.id,
-        });
-
         await expect(
           controller.create({
             companyId: company.id,
             type: TicketType.registrationAddressChange,
           }),
         ).rejects.toEqual(
-          new ConflictException(
-            `Multiple users with role corporateSecretary. Cannot create a ticket`,
+          new UnprocessableEntityException(
+            'Cannot find user with role corporateSecretary, director to create a ticket',
           ),
         );
       });
 
-      it('if there is no secretary, throw', async () => {
+      it('if there is an existing open ticket for the same company id, throw', async () => {
         const company = await Company.create({ name: 'test' });
+        const user = await User.create({
+          name: 'Test User',
+          role: UserRole.corporateSecretary,
+          companyId: company.id,
+        });
+        await Ticket.create({
+          companyId: company.id,
+          type: TicketType.registrationAddressChange,
+          assigneeId: user.id,
+          status: TicketStatus.open,
+        });
 
         await expect(
           controller.create({
@@ -141,8 +124,48 @@ describe('TicketsController', () => {
             type: TicketType.registrationAddressChange,
           }),
         ).rejects.toEqual(
-          new ConflictException(
-            `Cannot find user with role corporateSecretary to create a ticket`,
+          new UnprocessableEntityException(
+            'There is an open ticket for registration address change for company id: ' +
+              company.id,
+          ),
+        );
+      });
+    });
+
+    describe('strikeOff', () => {
+      it('creates strikeOff ticket', async () => {
+        const company = await Company.create({ name: 'test' });
+        const user = await User.create({
+          name: 'Test User',
+          role: UserRole.director,
+          companyId: company.id,
+        });
+
+        const ticket = await controller.create({
+          companyId: company.id,
+          type: TicketType.strikeOff,
+        });
+        expect(ticket.category).toBe(TicketCategory.management);
+        expect(ticket.assigneeId).toBe(user.id);
+        expect(ticket.status).toBe(TicketStatus.open);
+      });
+
+      it('if there is no assignee, throw', async () => {
+        const company = await Company.create({ name: 'test' });
+        await User.create({
+          name: 'Test User',
+          role: UserRole.accountant,
+          companyId: company.id,
+        });
+
+        await expect(
+          controller.create({
+            companyId: company.id,
+            type: TicketType.strikeOff,
+          }),
+        ).rejects.toEqual(
+          new UnprocessableEntityException(
+            'Cannot find user with role director to create a ticket',
           ),
         );
       });
